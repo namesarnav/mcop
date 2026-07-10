@@ -121,3 +121,50 @@ def test_gamma_and_vega_are_positive():
 def test_invalid_inputs_raise_value_error(bad):
     with pytest.raises(ValueError):
         bs_call_price(**dict(BASE, **bad))
+
+
+def test_bs_theta_matches_finite_difference_in_time():
+    from mcpricer.black_scholes import bs_theta
+
+    h = 1e-5
+    fd = -(
+        bs_call_price(**dict(BASE, T=1.0 + h)) - bs_call_price(**dict(BASE, T=1.0 - h))
+    ) / (2 * h)
+    assert abs(fd - bs_theta(**BASE, option_type="call")) < 1e-5
+
+
+def test_call_theta_is_negative_for_atm_option():
+    from mcpricer.black_scholes import bs_theta
+
+    assert bs_theta(**BASE, option_type="call") < 0
+
+
+def test_bs_rho_matches_finite_difference_in_rate():
+    from mcpricer.black_scholes import bs_rho
+
+    h = 1e-6
+    fd = (
+        bs_call_price(**dict(BASE, r=0.05 + h)) - bs_call_price(**dict(BASE, r=0.05 - h))
+    ) / (2 * h)
+    assert abs(fd - bs_rho(**BASE, option_type="call")) < 1e-4
+
+
+def test_bs_price_dispatch_matches_direct_calls():
+    from mcpricer.black_scholes import bs_price
+
+    assert bs_price(**BASE, option_type="call") == bs_call_price(**BASE)
+    assert bs_price(**BASE, option_type="put") == bs_put_price(**BASE)
+
+
+def test_unknown_option_type_raises():
+    from mcpricer.black_scholes import bs_price
+
+    with pytest.raises(ValueError):
+        bs_price(**BASE, option_type="straddle")
+
+
+def test_prices_broadcast_over_a_strike_ladder():
+    strikes = np.array([80.0, 90.0, 100.0, 110.0, 120.0])
+    prices = bs_call_price(S0=100.0, K=strikes, r=0.05, sigma=0.2, T=1.0)
+    assert prices.shape == strikes.shape
+    assert abs(prices[2] - bs_call_price(**BASE)) < 1e-12

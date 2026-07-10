@@ -17,6 +17,9 @@ __all__ = [
     "bs_put_delta",
     "bs_vega",
     "bs_gamma",
+    "bs_theta",
+    "bs_rho",
+    "bs_price",
 ]
 
 FloatOrArray = float | NDArray[np.float64]
@@ -36,6 +39,13 @@ def _validate(
     if np.any(T_a < 0):
         raise ValueError("time to maturity T must be non-negative")
     return arrays
+
+
+def _check_option_type(option_type: str) -> str:
+    normalised = option_type.strip().lower()
+    if normalised not in {"call", "put"}:
+        raise ValueError(f"option_type must be 'call' or 'put', got {option_type!r}")
+    return normalised
 
 
 def _unwrap(x: NDArray[np.float64]) -> FloatOrArray:
@@ -133,3 +143,59 @@ def bs_gamma(
     safe_vol = np.where(degenerate, 1.0, total_vol)
     gamma = np.where(degenerate, 0.0, norm.pdf(d1) / (S0 * safe_vol))
     return _unwrap(gamma)
+
+
+def bs_theta(
+    S0: ArrayLike,
+    K: ArrayLike,
+    r: ArrayLike,
+    sigma: ArrayLike,
+    T: ArrayLike,
+    option_type: str = "call",
+) -> FloatOrArray:
+    """Decay per year: -S0 phi(d1) sigma / (2 sqrt(T)) -/+ r K e^{-rT} N(+/-d2)."""
+    option_type = _check_option_type(option_type)
+    S0, K, r, sigma, T = _validate(S0, K, r, sigma, T)
+    d1, d2, degenerate = _d1_d2(S0, K, r, sigma, T)
+    discount = np.exp(-r * T)
+    safe_T = np.where(T <= 0, 1.0, T)
+    decay = -S0 * norm.pdf(d1) * sigma / (2.0 * np.sqrt(safe_T))
+    if option_type == "call":
+        theta = decay - r * K * discount * norm.cdf(d2)
+    else:
+        theta = decay + r * K * discount * norm.cdf(-d2)
+    return _unwrap(np.where(degenerate, 0.0, theta))
+
+
+def bs_rho(
+    S0: ArrayLike,
+    K: ArrayLike,
+    r: ArrayLike,
+    sigma: ArrayLike,
+    T: ArrayLike,
+    option_type: str = "call",
+) -> FloatOrArray:
+    """dC/dr = K T e^{-rT} N(d2); dP/dr = -K T e^{-rT} N(-d2)."""
+    option_type = _check_option_type(option_type)
+    S0, K, r, sigma, T = _validate(S0, K, r, sigma, T)
+    _, d2, degenerate = _d1_d2(S0, K, r, sigma, T)
+    discount = np.exp(-r * T)
+    if option_type == "call":
+        rho = K * T * discount * norm.cdf(d2)
+    else:
+        rho = -K * T * discount * norm.cdf(-d2)
+    return _unwrap(np.where(degenerate, 0.0, rho))
+
+
+def bs_price(
+    S0: ArrayLike,
+    K: ArrayLike,
+    r: ArrayLike,
+    sigma: ArrayLike,
+    T: ArrayLike,
+    option_type: str = "call",
+) -> FloatOrArray:
+    """Dispatch to the call or put price."""
+    if _check_option_type(option_type) == "call":
+        return bs_call_price(S0, K, r, sigma, T)
+    return bs_put_price(S0, K, r, sigma, T)
