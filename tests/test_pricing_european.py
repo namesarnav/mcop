@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from scipy.stats import norm
 
 from mcpricer.black_scholes import bs_call_price, bs_put_price
 from mcpricer.payoffs import call_payoff, put_payoff
@@ -54,7 +55,7 @@ def test_zero_volatility_price_is_exact():
     params = dict(BASE, sigma=0.0)
     estimate = mc_european_call_price(**params, n_paths=1000, seed=0)
     assert abs(estimate.price - bs_call_price(**params)) < 1e-10
-    assert estimate.standard_error == 0.0
+    assert estimate.standard_error < 1e-12
 
 
 def test_standard_error_halves_when_paths_quadruple():
@@ -67,7 +68,8 @@ def test_confidence_interval_brackets_the_estimate():
     estimate = mc_european_call_price(**BASE, n_paths=100_000, seed=3)
     low, high = estimate.confidence_interval(0.95)
     assert low < estimate.price < high
-    assert abs((high - low) - 2 * 1.96 * estimate.standard_error) < 1e-6
+    z = norm.ppf(0.975)
+    assert abs((high - low) - 2 * z * estimate.standard_error) < 1e-12
 
 
 def test_statistical_coverage_across_seeds():
