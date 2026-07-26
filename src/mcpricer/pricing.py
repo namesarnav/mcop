@@ -10,6 +10,7 @@ alongside that error: a Monte Carlo price without one is not a result.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import NamedTuple
 
 import numpy as np
@@ -23,6 +24,7 @@ __all__ = [
     "mc_european_price",
     "mc_european_call_price",
     "mc_european_put_price",
+    "convergence_study",
 ]
 
 
@@ -97,3 +99,35 @@ def mc_european_put_price(
     return mc_european_price(
         S0, K, r, sigma, T, n_paths, "put", seed=seed, rng=rng
     )
+
+
+def convergence_study(
+    S0: float,
+    K: float,
+    r: float,
+    sigma: float,
+    T: float,
+    path_counts: Sequence[int],
+    option_type: str = "call",
+    *,
+    seed: int | None = None,
+) -> dict[str, np.ndarray]:
+    """Price at each path count in turn, for the convergence plot.
+
+    Each run gets its own generator seeded from a common sequence so the points
+    are independent rather than nested subsets of one sample path.
+    """
+    seeds = np.random.SeedSequence(seed).spawn(len(path_counts))
+    prices, errors = [], []
+    for n, child in zip(path_counts, seeds):
+        estimate = mc_european_price(
+            S0, K, r, sigma, T, n, option_type,
+            rng=np.random.default_rng(child),
+        )
+        prices.append(estimate.price)
+        errors.append(estimate.standard_error)
+    return {
+        "n_paths": np.asarray(path_counts, dtype=np.int64),
+        "price": np.asarray(prices, dtype=np.float64),
+        "standard_error": np.asarray(errors, dtype=np.float64),
+    }

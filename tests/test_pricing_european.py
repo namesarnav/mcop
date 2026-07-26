@@ -86,3 +86,21 @@ def test_statistical_coverage_across_seeds():
 def test_invalid_path_count_raises():
     with pytest.raises(ValueError):
         mc_european_call_price(**BASE, n_paths=0, seed=0)
+
+
+def test_convergence_study_error_shrinks_with_path_count():
+    from mcpricer.pricing import convergence_study
+
+    study = convergence_study(**BASE, path_counts=[1_000, 10_000, 100_000], seed=11)
+    errors = study["standard_error"]
+    assert np.all(np.diff(errors) < 0)
+    # Roughly 1/sqrt(N): a 100x path count should cut the error near 10x.
+    assert 7.0 < errors[0] / errors[2] < 14.0
+
+
+def test_convergence_study_prices_approach_black_scholes():
+    from mcpricer.pricing import convergence_study
+
+    study = convergence_study(**BASE, path_counts=[1_000, 1_000_000], seed=12)
+    truth = bs_call_price(**BASE)
+    assert abs(study["price"][1] - truth) < 3 * study["standard_error"][1]
