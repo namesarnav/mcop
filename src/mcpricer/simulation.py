@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ["simulate_gbm_terminal", "simulate_gbm_paths"]
+__all__ = ["gbm_terminal_from_normals", "simulate_gbm_terminal", "simulate_gbm_paths"]
 
 
 def _make_rng(seed: int | None, rng: np.random.Generator | None) -> np.random.Generator:
@@ -35,6 +35,17 @@ def _validate(S0: float, sigma: float, T: float, n_paths: int) -> None:
         raise ValueError("n_paths must be strictly positive")
 
 
+def gbm_terminal_from_normals(
+    S0: float, r: float, sigma: float, T: float, z: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Map standard normal draws to terminal prices.
+
+    Separated out so callers can supply their own draws: antithetic variates
+    reuse -z, and finite-difference Greeks reuse the same z across both legs.
+    """
+    return S0 * np.exp((r - 0.5 * sigma**2) * T + sigma * np.sqrt(T) * z)
+
+
 def simulate_gbm_terminal(
     S0: float,
     r: float,
@@ -53,9 +64,7 @@ def simulate_gbm_terminal(
     _validate(S0, sigma, T, n_paths)
     generator = _make_rng(seed, rng)
     z = generator.standard_normal(n_paths)
-    drift = (r - 0.5 * sigma**2) * T
-    diffusion = sigma * np.sqrt(T) * z
-    return S0 * np.exp(drift + diffusion)
+    return gbm_terminal_from_normals(S0, r, sigma, T, z)
 
 
 def simulate_gbm_paths(
