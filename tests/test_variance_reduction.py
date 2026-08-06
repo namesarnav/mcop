@@ -78,3 +78,14 @@ def test_both_techniques_beat_naive_on_the_same_seed():
     _, se_cv, _ = mc_european_price_control_variate(**BASE, n_paths=N, seed=13)
     assert variance_reduction_pct(se_naive, se_anti) > 0
     assert variance_reduction_pct(se_naive, se_cv) > 0
+
+
+def test_comparison_table_reports_all_three_estimators():
+    from mcpricer.variance_reduction import compare_estimators
+
+    rows = compare_estimators(**BASE, n_paths=N, seed=14)
+    assert [row["method"] for row in rows] == ["naive", "antithetic", "control variate"]
+    assert rows[0]["variance_reduction_pct"] == 0.0
+    assert all(row["variance_reduction_pct"] > 0 for row in rows[1:])
+    truth = bs_call_price(**BASE)
+    assert all(abs(row["price"] - truth) < 3 * row["standard_error"] for row in rows)

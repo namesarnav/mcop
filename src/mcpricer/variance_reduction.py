@@ -12,13 +12,18 @@ from typing import NamedTuple
 import numpy as np
 
 from mcpricer.payoffs import get_payoff
-from mcpricer.pricing import PriceEstimate, estimate_from_discounted_payoffs
+from mcpricer.pricing import (
+    PriceEstimate,
+    estimate_from_discounted_payoffs,
+    mc_european_price,
+)
 from mcpricer.simulation import gbm_terminal_from_normals, simulate_gbm_terminal
 
 __all__ = [
     "mc_european_price_antithetic",
     "mc_european_price_control_variate",
     "variance_reduction_pct",
+    "compare_estimators",
 ]
 
 
@@ -124,3 +129,51 @@ def variance_reduction_pct(se_naive: float, se_reduced: float) -> float:
     if se_naive <= 0:
         raise ValueError("baseline standard error must be positive")
     return 100.0 * (1.0 - (se_reduced / se_naive) ** 2)
+
+
+def compare_estimators(
+    S0: float,
+    K: float,
+    r: float,
+    sigma: float,
+    T: float,
+    n_paths: int,
+    option_type: str = "call",
+    *,
+    seed: int | None = None,
+) -> list[dict[str, float | str]]:
+    """Price with each estimator at a matched path count, for the writeup.
+
+    Each estimator gets its own child seed so the comparison is not an artefact
+    of one lucky draw shared between them.
+    """
+    naive_seed, anti_seed, cv_seed = np.random.SeedSequence(seed).spawn(3)
+    naive = mc_european_price(
+        S0, K, r, sigma, T, n_paths, option_type,
+        rng=np.random.default_rng(naive_seed),
+    )
+    antithetic = mc_european_price_antithetic(
+        S0, K, r, sigma, T, n_paths, option_type,
+        rng=np.random.default_rng(anti_seed),
+    )
+    control = mc_european_price_control_variate(
+        S0, K, r, sigma, T, n_paths, option_type,
+        rng=np.random.default_rng(cv_seed),
+    )
+    rows = []
+    for name, estimate in (
+        ("naive", naive),
+        ("antithetic", antithetic),
+        ("control variate", control),
+    ):
+        rows.append(
+            {
+                "method": name,
+                "price": estimate.price,
+                "standard_error": estimate.standard_error,
+                "variance_reduction_pct": variance_reduction_pct(
+                    naive.standard_error, estimate.standard_error
+                ),
+            }
+        )
+    return rows
