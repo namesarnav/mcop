@@ -46,3 +46,44 @@ def test_finite_difference_delta_is_reproducible():
     a = mc_delta_finite_difference(**BASE, n_paths=10_000, bump=0.01, seed=5)
     b = mc_delta_finite_difference(**BASE, n_paths=10_000, bump=0.01, seed=5)
     assert a.value == b.value
+
+
+def test_pathwise_delta_matches_bs_delta():
+    from mcpricer.greeks import mc_delta_pathwise
+
+    estimate = mc_delta_pathwise(**BASE, n_paths=N, seed=6)
+    assert abs(estimate.value - bs_call_delta(**BASE)) < 3 * estimate.standard_error
+
+
+def test_pathwise_put_delta_matches_bs_delta():
+    from mcpricer.greeks import mc_delta_pathwise
+
+    estimate = mc_delta_pathwise(**BASE, n_paths=N, option_type="put", seed=7)
+    assert abs(estimate.value - bs_put_delta(**BASE)) < 3 * estimate.standard_error
+
+
+def test_pathwise_delta_matches_crn_finite_difference_variance():
+    # As the bump shrinks the CRN difference quotient converges to the pathwise
+    # derivative, so the two estimators should have essentially the same error.
+    from mcpricer.greeks import mc_delta_pathwise
+
+    pathwise = mc_delta_pathwise(**BASE, n_paths=N, seed=8)
+    fd = mc_delta_finite_difference(**BASE, n_paths=N, bump=0.01, seed=8)
+    assert abs(pathwise.standard_error / fd.standard_error - 1.0) < 0.05
+
+
+def test_pathwise_delta_beats_finite_difference_without_crn():
+    from mcpricer.greeks import mc_delta_pathwise
+
+    pathwise = mc_delta_pathwise(**BASE, n_paths=N, seed=9)
+    fd = mc_delta_finite_difference(
+        **BASE, n_paths=N, bump=0.01, seed=9, common_random_numbers=False
+    )
+    assert pathwise.standard_error < fd.standard_error / 100
+
+
+def test_pathwise_rejects_unknown_option_type():
+    from mcpricer.greeks import mc_delta_pathwise
+
+    with pytest.raises(ValueError):
+        mc_delta_pathwise(**BASE, n_paths=1000, option_type="digital", seed=0)
