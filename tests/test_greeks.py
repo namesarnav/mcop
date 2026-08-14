@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from mcpricer.black_scholes import bs_call_delta, bs_put_delta
+from mcpricer.black_scholes import bs_call_delta, bs_gamma, bs_put_delta, bs_vega
 from mcpricer.greeks import mc_delta_finite_difference
 
 BASE = dict(S0=100.0, K=100.0, r=0.05, sigma=0.2, T=1.0)
@@ -87,3 +87,49 @@ def test_pathwise_rejects_unknown_option_type():
 
     with pytest.raises(ValueError):
         mc_delta_pathwise(**BASE, n_paths=1000, option_type="digital", seed=0)
+
+
+def test_finite_difference_vega_matches_bs_vega():
+    from mcpricer.greeks import mc_vega_finite_difference
+
+    estimate = mc_vega_finite_difference(**BASE, n_paths=N, bump=0.01, seed=10)
+    assert abs(estimate.value - bs_vega(**BASE)) < 3 * estimate.standard_error
+
+
+def test_pathwise_vega_matches_bs_vega():
+    from mcpricer.greeks import mc_vega_pathwise
+
+    estimate = mc_vega_pathwise(**BASE, n_paths=N, seed=11)
+    assert abs(estimate.value - bs_vega(**BASE)) < 3 * estimate.standard_error
+
+
+def test_put_vega_is_positive_and_equals_call_vega():
+    from mcpricer.greeks import mc_vega_pathwise
+
+    estimate = mc_vega_pathwise(**BASE, n_paths=N, option_type="put", seed=12)
+    assert estimate.value > 0
+    assert abs(estimate.value - bs_vega(**BASE)) < 3 * estimate.standard_error
+
+
+def test_vega_bump_cannot_push_volatility_negative():
+    from mcpricer.greeks import mc_vega_finite_difference
+
+    with pytest.raises(ValueError):
+        mc_vega_finite_difference(**BASE, n_paths=1000, bump=0.5, seed=0)
+
+
+def test_finite_difference_gamma_matches_bs_gamma():
+    from mcpricer.greeks import mc_gamma_finite_difference
+
+    estimate = mc_gamma_finite_difference(**BASE, n_paths=1_000_000, bump=1.0, seed=13)
+    assert abs(estimate.value - bs_gamma(**BASE)) < 3 * estimate.standard_error
+
+
+def test_gamma_error_grows_as_the_bump_shrinks():
+    # The second difference divides by h^2, so gamma needs a wider bump than
+    # delta before the estimator is usable.
+    from mcpricer.greeks import mc_gamma_finite_difference
+
+    wide = mc_gamma_finite_difference(**BASE, n_paths=200_000, bump=2.0, seed=14)
+    narrow = mc_gamma_finite_difference(**BASE, n_paths=200_000, bump=0.25, seed=14)
+    assert narrow.standard_error > 2 * wide.standard_error
