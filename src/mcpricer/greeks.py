@@ -15,7 +15,14 @@ import numpy as np
 from mcpricer.payoffs import get_payoff
 from mcpricer.simulation import gbm_terminal_from_normals
 
-__all__ = ["GreekEstimate", "mc_delta_finite_difference", "mc_delta_pathwise"]
+__all__ = [
+    "GreekEstimate",
+    "mc_delta_finite_difference",
+    "mc_delta_pathwise",
+    "mc_vega_finite_difference",
+    "mc_vega_pathwise",
+    "mc_gamma_finite_difference",
+]
 
 
 class GreekEstimate(NamedTuple):
@@ -103,3 +110,103 @@ def mc_delta_pathwise(
     else:
         samples = -discount * (terminal < K) * terminal / S0
     return _estimate(samples)
+
+
+def mc_vega_finite_difference(
+    S0: float,
+    K: float,
+    r: float,
+    sigma: float,
+    T: float,
+    n_paths: int,
+    option_type: str = "call",
+    *,
+    bump: float = 0.01,
+    common_random_numbers: bool = True,
+    seed: int | None = None,
+    rng: np.random.Generator | None = None,
+) -> GreekEstimate:
+    """Central difference in sigma under common random numbers."""
+    if bump <= 0:
+        raise ValueError("bump must be strictly positive")
+    if sigma - bump < 0:
+        raise ValueError("bump must not push sigma negative")
+
+    generator = rng if rng is not None else np.random.default_rng(seed)
+    payoff = get_payoff(option_type)
+    discount = np.exp(-r * T)
+
+    z_up = generator.standard_normal(n_paths)
+    z_down = z_up if common_random_numbers else generator.standard_normal(n_paths)
+
+    up = payoff(gbm_terminal_from_normals(S0, r, sigma + bump, T, z_up), K)
+    down = payoff(gbm_terminal_from_normals(S0, r, sigma - bump, T, z_down), K)
+    return _estimate(discount * (up - down) / (2.0 * bump))
+
+
+def mc_vega_pathwise(
+    S0: float,
+    K: float,
+    r: float,
+    sigma: float,
+    T: float,
+    n_paths: int,
+    option_type: str = "call",
+    *,
+    seed: int | None = None,
+    rng: np.random.Generator | None = None,
+) -> GreekEstimate:
+    """dS_T/dsigma = S_T (sqrt(T) z - sigma T), so the estimator is
+
+        call:  e^{-rT} 1{S_T > K} S_T (sqrt(T) z - sigma T)
+        put:  -e^{-rT} 1{S_T < K} S_T (sqrt(T) z - sigma T)
+
+    Both come out positive: a put also gains value with volatility.
+    """
+    normalised = option_type.strip().lower()
+    if normalised not in {"call", "put"}:
+        raise ValueError(f"option_type must be 'call' or 'put', got {option_type!r}")
+
+    generator = rng if rng is not None else np.random.default_rng(seed)
+    z = generator.standard_normal(n_paths)
+    terminal = gbm_terminal_from_normals(S0, r, sigma, T, z)
+    sensitivity = terminal * (np.sqrt(T) * z - sigma * T)
+    if normalised == "call":
+        samples = (terminal > K) * sensitivity
+    else:
+        samples = -((terminal < K) * sensitivity)
+    return _estimate(np.exp(-r * T) * samples)
+
+
+def mc_gamma_finite_difference(
+    S0: float,
+    K: float,
+    r: float,
+    sigma: float,
+    T: float,
+    n_paths: int,
+    option_type: str = "call",
+    *,
+    bump: float = 1.0,
+    seed: int | None = None,
+    rng: np.random.Generator | None = None,
+) -> GreekEstimate:
+    """Second difference [C(S0+h) - 2C(S0) + C(S0-h)] / h^2 under shared draws.
+
+    The bump is divided by h^2 here rather than h, so gamma needs a noticeably
+    larger bump than delta to keep the estimator's variance usable. There is no
+    pathwise estimator for gamma: the first derivative already contains an
+    indicator, whose derivative is a delta function.
+    """
+    if bump <= 0:
+        raise ValueError("bump must be strictly positive")
+
+    generator = rng if rng is not None else np.random.default_rng(seed)
+    payoff = get_payoff(option_type)
+    discount = np.exp(-r * T)
+    z = generator.standard_normal(n_paths)
+
+    up = payoff(gbm_terminal_from_normals(S0 + bump, r, sigma, T, z), K)
+    mid = payoff(gbm_terminal_from_normals(S0, r, sigma, T, z), K)
+    down = payoff(gbm_terminal_from_normals(S0 - bump, r, sigma, T, z), K)
+    return _estimate(discount * (up - 2.0 * mid + down) / bump**2)
