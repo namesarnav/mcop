@@ -58,8 +58,10 @@ def test_american_price_never_below_intrinsic():
 
 @pytest.mark.parametrize("bad", [dict(n_steps=0), dict(sigma=0.0), dict(T=0.0)])
 def test_invalid_inputs_raise(bad):
+    params = dict(BASE, n_steps=100)
+    params.update(bad)
     with pytest.raises(ValueError):
-        binomial_american_put_price(**dict(BASE, n_steps=100, **bad))
+        binomial_american_put_price(**params)
 
 
 def test_unknown_exercise_style_raises():
