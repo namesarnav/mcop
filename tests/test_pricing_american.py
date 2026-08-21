@@ -33,11 +33,14 @@ def test_early_exercise_premium_is_positive_for_a_put():
     assert abs(premium - tree_premium) < 0.1
 
 
-def test_deep_itm_american_put_is_exercised_immediately():
-    lsm = lsm_american_price(
-        S0=40.0, K=100.0, r=0.05, sigma=0.2, T=1.0, n_paths=50_000, n_steps=STEPS, seed=4
-    )
-    assert abs(lsm.price - 60.0) < 0.05
+def test_deep_itm_american_put_approaches_intrinsic_from_below():
+    # Exercise is only allowed on the discrete grid, so LSM is a lower bound
+    # that tightens towards the intrinsic value 60 as the grid is refined.
+    params = dict(S0=40.0, K=100.0, r=0.05, sigma=0.2, T=1.0, n_paths=50_000, seed=4)
+    coarse = lsm_american_price(**params, n_steps=25).price
+    fine = lsm_american_price(**params, n_steps=100).price
+    assert coarse < fine <= 60.0 + 1e-9
+    assert abs(fine - 60.0) < 0.1
 
 
 def test_lsm_is_reproducible_under_a_fixed_seed():
