@@ -13,7 +13,12 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ["gbm_terminal_from_normals", "simulate_gbm_terminal", "simulate_gbm_paths"]
+__all__ = [
+    "gbm_terminal_from_normals",
+    "simulate_gbm_terminal",
+    "simulate_gbm_paths",
+    "simulate_merton_terminal",
+]
 
 
 def _make_rng(seed: int | None, rng: np.random.Generator | None) -> np.random.Generator:
@@ -93,3 +98,44 @@ def simulate_gbm_paths(
         [np.zeros((n_paths, 1)), np.cumsum(increments, axis=1)], axis=1
     )
     return S0 * np.exp(log_paths)
+
+
+def simulate_merton_terminal(
+    S0: float,
+    r: float,
+    sigma: float,
+    T: float,
+    n_paths: int,
+    *,
+    jump_intensity: float,
+    jump_mean: float,
+    jump_std: float,
+    seed: int | None = None,
+    rng: np.random.Generator | None = None,
+) -> NDArray[np.float64]:
+    """Merton jump-diffusion terminal prices.
+
+        S_T = S0 exp[(r - lambda k - sigma^2/2) T + sigma sqrt(T) Z + sum_i Y_i]
+
+    with N_T ~ Poisson(lambda T) log-jumps Y_i ~ N(jump_mean, jump_std^2) and
+    k = e^{jump_mean + jump_std^2/2} - 1. The -lambda k drift offset is the
+    compensator that keeps the discounted price a martingale.
+
+    Conditional on N_T the jump sum is itself normal, so no per-jump loop is
+    needed.
+    """
+    _validate(S0, sigma, T, n_paths)
+    if jump_intensity < 0:
+        raise ValueError("jump_intensity must be non-negative")
+    if jump_std < 0:
+        raise ValueError("jump_std must be non-negative")
+
+    generator = _make_rng(seed, rng)
+    k = np.exp(jump_mean + 0.5 * jump_std**2) - 1.0
+    n_jumps = generator.poisson(jump_intensity * T, n_paths)
+    z_diffusion = generator.standard_normal(n_paths)
+    z_jump = generator.standard_normal(n_paths)
+
+    jump_component = jump_mean * n_jumps + jump_std * np.sqrt(n_jumps) * z_jump
+    drift = (r - jump_intensity * k - 0.5 * sigma**2) * T
+    return S0 * np.exp(drift + sigma * np.sqrt(T) * z_diffusion + jump_component)

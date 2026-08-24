@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+from scipy.special import gammaln
 from scipy.stats import norm
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "bs_theta",
     "bs_rho",
     "bs_price",
+    "merton_call_price",
 ]
 
 FloatOrArray = float | NDArray[np.float64]
@@ -199,3 +201,38 @@ def bs_price(
     if _check_option_type(option_type) == "call":
         return bs_call_price(S0, K, r, sigma, T)
     return bs_put_price(S0, K, r, sigma, T)
+
+
+def merton_call_price(
+    S0: float,
+    K: float,
+    r: float,
+    sigma: float,
+    T: float,
+    jump_intensity: float,
+    jump_mean: float,
+    jump_std: float,
+    n_terms: int = 60,
+) -> float:
+    """Merton's jump-diffusion call price: a Poisson-weighted sum of BS prices.
+
+    Conditional on n jumps the terminal law is again lognormal, with variance
+    sigma^2 + n jump_std^2 / T and a shifted drift, so
+
+        C = sum_n e^{-lT} (lT)^n / n! BS(S0, K, r_n, sigma_n, T)
+
+    where l = lambda(1 + k). Used only as an oracle for the simulator.
+    """
+    if n_terms < 1:
+        raise ValueError("n_terms must be at least 1")
+    k = np.exp(jump_mean + 0.5 * jump_std**2) - 1.0
+    lam = jump_intensity * (1.0 + k)
+    n = np.arange(n_terms)
+    log_weights = -lam * T + n * np.log(lam * T) - gammaln(n + 1) if lam > 0 else None
+    if lam == 0:
+        return float(bs_call_price(S0, K, r, sigma, T))
+    weights = np.exp(log_weights)
+    sigma_n = np.sqrt(sigma**2 + n * jump_std**2 / T)
+    r_n = r - jump_intensity * k + n * (jump_mean + 0.5 * jump_std**2) / T
+    prices = bs_call_price(S0, K, r_n, sigma_n, T)
+    return float(np.sum(weights * prices))
