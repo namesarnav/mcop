@@ -18,6 +18,7 @@ __all__ = [
     "simulate_gbm_terminal",
     "simulate_gbm_paths",
     "simulate_merton_terminal",
+    "simulate_heston_paths",
 ]
 
 
@@ -139,3 +140,65 @@ def simulate_merton_terminal(
     jump_component = jump_mean * n_jumps + jump_std * np.sqrt(n_jumps) * z_jump
     drift = (r - jump_intensity * k - 0.5 * sigma**2) * T
     return S0 * np.exp(drift + sigma * np.sqrt(T) * z_diffusion + jump_component)
+
+
+def simulate_heston_paths(
+    S0: float,
+    r: float,
+    T: float,
+    n_paths: int,
+    n_steps: int,
+    *,
+    v0: float,
+    kappa: float,
+    theta: float,
+    xi: float,
+    rho: float,
+    seed: int | None = None,
+    rng: np.random.Generator | None = None,
+    return_variance: bool = False,
+) -> NDArray[np.float64] | tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Heston stochastic volatility, full truncation Euler scheme.
+
+        dS = r S dt + sqrt(v) S dW1
+        dv = kappa (theta - v) dt + xi sqrt(v) dW2,   corr(dW1, dW2) = rho
+
+    Euler steps can drive v below zero even when the Feller condition holds, so
+    every use of v is replaced by max(v, 0). Full truncation keeps the negative
+    value in the state and only truncates where v is read, which is the variant
+    with the smallest discretisation bias.
+    """
+    _validate(S0, 0.0, T, n_paths)
+    if n_steps <= 0:
+        raise ValueError("n_steps must be strictly positive")
+    if v0 < 0 or theta < 0 or xi < 0 or kappa < 0:
+        raise ValueError("v0, kappa, theta and xi must be non-negative")
+    if not -1.0 <= rho <= 1.0:
+        raise ValueError("rho must lie in [-1, 1]")
+
+    generator = _make_rng(seed, rng)
+    dt = T / n_steps
+    sqrt_dt = np.sqrt(dt)
+
+    z1 = generator.standard_normal((n_paths, n_steps))
+    z2 = rho * z1 + np.sqrt(1.0 - rho**2) * generator.standard_normal((n_paths, n_steps))
+
+    log_s = np.empty((n_paths, n_steps + 1))
+    variance = np.empty((n_paths, n_steps + 1))
+    log_s[:, 0] = np.log(S0)
+    variance[:, 0] = v0
+
+    for step in range(n_steps):
+        v_plus = np.maximum(variance[:, step], 0.0)
+        vol = np.sqrt(v_plus)
+        log_s[:, step + 1] = (
+            log_s[:, step] + (r - 0.5 * v_plus) * dt + vol * sqrt_dt * z1[:, step]
+        )
+        variance[:, step + 1] = (
+            variance[:, step]
+            + kappa * (theta - v_plus) * dt
+            + xi * vol * sqrt_dt * z2[:, step]
+        )
+
+    paths = np.exp(log_s)
+    return (paths, variance) if return_variance else paths
