@@ -157,3 +157,40 @@ def test_invalid_heston_parameters_raise(bad):
         simulate_heston_paths(
             S0=100.0, r=0.05, T=1.0, n_paths=100, n_steps=10, seed=0, **params
         )
+
+
+SMILE_STRIKES = np.array([85.0, 92.5, 100.0, 107.5, 115.0])
+
+
+def _smile_from_terminal(terminal):
+    from mcpricer.black_scholes import implied_volatility_smile
+
+    prices = np.array(
+        [np.exp(-0.05) * call_payoff(terminal, k).mean() for k in SMILE_STRIKES]
+    )
+    return implied_volatility_smile(prices, 100.0, SMILE_STRIKES, 0.05, 1.0)
+
+
+def test_gbm_implied_volatility_is_flat_by_construction():
+    smile = _smile_from_terminal(simulate_gbm_terminal(**BASE, n_paths=300_000, seed=2))
+    assert np.ptp(smile) < 0.005
+    assert abs(smile.mean() - 0.2) < 0.005
+
+
+def test_heston_produces_a_downward_sloping_skew():
+    from mcpricer.simulation import simulate_heston_paths
+
+    terminal = simulate_heston_paths(
+        S0=100.0, r=0.05, T=1.0, n_paths=300_000, n_steps=100, seed=0,
+        v0=0.04, kappa=2.0, theta=0.04, xi=0.6, rho=-0.7,
+    )[:, -1]
+    smile = _smile_from_terminal(terminal)
+    assert np.all(np.diff(smile) < 0)
+    assert np.ptp(smile) > 0.03
+
+
+def test_merton_downward_jumps_produce_a_skew():
+    terminal = simulate_merton_terminal(**BASE, n_paths=1_000_000, seed=1, **JUMPS)
+    smile = _smile_from_terminal(terminal)
+    assert smile[0] > smile[-1]
+    assert np.ptp(smile) > 0.005

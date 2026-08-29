@@ -168,3 +168,40 @@ def test_prices_broadcast_over_a_strike_ladder():
     prices = bs_call_price(S0=100.0, K=strikes, r=0.05, sigma=0.2, T=1.0)
     assert prices.shape == strikes.shape
     assert abs(prices[2] - bs_call_price(**BASE)) < 1e-12
+
+
+@pytest.mark.parametrize("sigma", [0.05, 0.2, 0.6, 1.5])
+@pytest.mark.parametrize("K", [70.0, 100.0, 140.0])
+def test_implied_volatility_round_trips(sigma, K):
+    from mcpricer.black_scholes import implied_volatility
+
+    price = bs_call_price(S0=100.0, K=K, r=0.05, sigma=sigma, T=1.0)
+    assert abs(implied_volatility(price, 100.0, K, 0.05, 1.0) - sigma) < 1e-6
+
+
+def test_implied_volatility_round_trips_for_puts():
+    from mcpricer.black_scholes import implied_volatility
+
+    price = bs_put_price(S0=100.0, K=110.0, r=0.05, sigma=0.35, T=1.0)
+    assert abs(implied_volatility(price, 100.0, 110.0, 0.05, 1.0, "put") - 0.35) < 1e-6
+
+
+def test_implied_volatility_of_the_zero_vol_price_is_zero():
+    from mcpricer.black_scholes import implied_volatility
+
+    price = bs_call_price(**dict(BASE, sigma=0.0))
+    assert implied_volatility(price, 100.0, 100.0, 0.05, 1.0) == 0.0
+
+
+def test_implied_volatility_rejects_an_unattainable_price():
+    from mcpricer.black_scholes import implied_volatility
+
+    with pytest.raises(ValueError):
+        implied_volatility(200.0, 100.0, 100.0, 0.05, 1.0)
+
+
+def test_smile_helper_rejects_mismatched_shapes():
+    from mcpricer.black_scholes import implied_volatility_smile
+
+    with pytest.raises(ValueError):
+        implied_volatility_smile([1.0, 2.0], 100.0, [100.0], 0.05, 1.0)
