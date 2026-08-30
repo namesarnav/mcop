@@ -172,9 +172,24 @@ def test_prices_broadcast_over_a_strike_ladder():
 
 @pytest.mark.parametrize("sigma", [0.05, 0.2, 0.6, 1.5])
 @pytest.mark.parametrize("K", [70.0, 100.0, 140.0])
-def test_implied_volatility_round_trips(sigma, K):
+def test_implied_volatility_reprices_the_input(sigma, K):
     from mcpricer.black_scholes import implied_volatility
 
+    price = bs_call_price(S0=100.0, K=K, r=0.05, sigma=sigma, T=1.0)
+    recovered = implied_volatility(price, 100.0, K, 0.05, 1.0)
+    assert abs(bs_call_price(S0=100.0, K=K, r=0.05, sigma=recovered, T=1.0) - price) < 1e-8
+
+
+@pytest.mark.parametrize("sigma", [0.05, 0.2, 0.6, 1.5])
+@pytest.mark.parametrize("K", [70.0, 100.0, 140.0])
+def test_implied_volatility_round_trips_where_vega_is_material(sigma, K):
+    # Deep in the money at low volatility the price is pinned to intrinsic and
+    # vega vanishes, so sigma is not recoverable from the price to any useful
+    # precision. Skip exactly those points rather than loosening the tolerance.
+    from mcpricer.black_scholes import implied_volatility
+
+    if bs_vega(S0=100.0, K=K, r=0.05, sigma=sigma, T=1.0) < 1e-3:
+        pytest.skip("vega too small for sigma to be identifiable")
     price = bs_call_price(S0=100.0, K=K, r=0.05, sigma=sigma, T=1.0)
     assert abs(implied_volatility(price, 100.0, K, 0.05, 1.0) - sigma) < 1e-6
 

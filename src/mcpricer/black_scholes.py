@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+from scipy.optimize import brentq
 from scipy.special import gammaln
 from scipy.stats import norm
 
@@ -22,6 +23,8 @@ __all__ = [
     "bs_rho",
     "bs_price",
     "merton_call_price",
+    "implied_volatility",
+    "implied_volatility_smile",
 ]
 
 FloatOrArray = float | NDArray[np.float64]
@@ -236,3 +239,57 @@ def merton_call_price(
     r_n = r - jump_intensity * k + n * (jump_mean + 0.5 * jump_std**2) / T
     prices = bs_call_price(S0, K, r_n, sigma_n, T)
     return float(np.sum(weights * prices))
+
+
+def implied_volatility(
+    price: float,
+    S0: float,
+    K: float,
+    r: float,
+    T: float,
+    option_type: str = "call",
+    *,
+    max_vol: float = 5.0,
+    tol: float = 1e-10,
+) -> float:
+    """Invert Black-Scholes for sigma by bisection on [0, max_vol].
+
+    The price is strictly increasing in sigma, so the root is unique and
+    bracketing is safe; Newton can leave the bracket for deep out-of-the-money
+    quotes where vega is nearly zero.
+    """
+    option_type = _check_option_type(option_type)
+    lower = float(bs_price(S0, K, r, 0.0, T, option_type))
+    upper = float(bs_price(S0, K, r, max_vol, T, option_type))
+    if not lower - tol <= price <= upper + tol:
+        raise ValueError(
+            f"price {price} is outside the attainable range [{lower}, {upper}]"
+        )
+    if price <= lower + tol:
+        return 0.0
+
+    def objective(sigma: float) -> float:
+        return float(bs_price(S0, K, r, sigma, T, option_type)) - price
+
+    return float(brentq(objective, 1e-12, max_vol, xtol=tol))
+
+
+def implied_volatility_smile(
+    prices: ArrayLike,
+    S0: float,
+    strikes: ArrayLike,
+    r: float,
+    T: float,
+    option_type: str = "call",
+) -> NDArray[np.float64]:
+    """Implied volatility at each strike, for plotting a smile."""
+    prices = np.atleast_1d(np.asarray(prices, dtype=np.float64))
+    strikes = np.atleast_1d(np.asarray(strikes, dtype=np.float64))
+    if prices.shape != strikes.shape:
+        raise ValueError("prices and strikes must have the same shape")
+    return np.array(
+        [
+            implied_volatility(p, S0, k, r, T, option_type)
+            for p, k in zip(prices, strikes)
+        ]
+    )
