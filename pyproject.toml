@@ -23,3 +23,10 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["mcpricer"]
+omit = ["*/reporting.py"]
+
+[tool.coverage.report]
+show_missing = true
