@@ -9,5 +9,4 @@ build/
 dist/
 .venv/
 venv/
-figures/
 .DS_Store
