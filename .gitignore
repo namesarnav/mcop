@@ -9,4 +9,5 @@ build/
 dist/
 .venv/
 venv/
+project.md
 .DS_Store
