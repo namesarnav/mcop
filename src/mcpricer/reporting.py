@@ -35,6 +35,8 @@ from mcpricer.simulation import (
     simulate_heston_paths,
     simulate_merton_terminal,
 )
+from mcpricer.backtest import backtest_straddle
+from mcpricer.data import load_market_data
 from mcpricer.variance_reduction import compare_estimators
 
 BASE = dict(S0=100.0, K=100.0, r=0.05, sigma=0.2, T=1.0)
@@ -44,6 +46,7 @@ __all__ = [
     "plot_variance_reduction",
     "greeks_table",
     "plot_volatility_smiles",
+    "plot_hedging_backtest",
 ]
 
 
@@ -161,3 +164,35 @@ def plot_volatility_smiles(path: Path, n_paths: int = 500_000) -> dict[str, np.n
     plt.close(figure)
     smiles["strikes"] = strikes
     return smiles
+
+
+def plot_hedging_backtest(path: Path, iv_offset: float = -0.015, hedge_cost_bps: float = 1.0):
+    """Cumulative P&L of the delta-hedged short straddle, and the premium that
+    drives it: entry implied volatility against volatility subsequently
+    realised over the same cycle."""
+    data = load_market_data()
+    hedged = backtest_straddle(data, iv_offset=iv_offset, hedge_cost_bps=hedge_cost_bps)
+    unhedged = backtest_straddle(data, hedge=False, iv_offset=iv_offset)
+
+    figure, axes = plt.subplots(1, 2, figsize=(11, 4))
+    axes[0].plot(hedged.daily.index, hedged.daily["pnl"].cumsum(), label="delta hedged")
+    axes[0].plot(
+        unhedged.daily.index, unhedged.daily["pnl"].cumsum(), alpha=0.7, label="unhedged"
+    )
+    axes[0].axhline(0.0, color="black", linewidth=0.8)
+    axes[0].set_ylabel("cumulative P&L (fraction of notional)")
+    axes[0].set_title("Short one-month ATM straddle, S&P 500")
+    axes[0].legend()
+
+    cycles = hedged.cycles
+    limit = max(cycles["entry_iv"].max(), cycles["realised_vol"].max()) * 1.05
+    axes[1].scatter(cycles["realised_vol"], cycles["entry_iv"], s=18, alpha=0.7)
+    axes[1].plot([0, limit], [0, limit], color="black", linestyle="--", linewidth=0.8)
+    axes[1].set_xlabel("realised volatility over the cycle")
+    axes[1].set_ylabel("implied volatility at entry")
+    axes[1].set_title("Variance risk premium (points above the line)")
+
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
+    plt.close(figure)
+    return hedged, unhedged

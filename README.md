@@ -1,20 +1,72 @@
 # Monte Carlo Options Pricer
 
-A Monte Carlo engine for pricing European and American options, with variance
-reduction, Greeks estimation, and alternative asset dynamics. Every stochastic
-result is validated against an independent deterministic reference — closed-form
-Black-Scholes, Merton's series solution, or a binomial tree — so correctness is
-demonstrated rather than asserted.
+A Monte Carlo engine for pricing European and American options — with variance
+reduction, Greeks, and alternative asset dynamics — and a backtest that puts its
+deltas to work hedging a real position on ten years of S&P 500 data.
 
-98% test coverage on the pricing and simulation modules. All figures and tables
-below are reproducible from fixed seeds via `python scripts/generate_report.py`.
+The engine half is validated against independent deterministic references:
+closed-form Black-Scholes, Merton's series solution, a binomial tree. The
+backtest half has no oracle, which is the point of including it — it produces a
+P&L that can be wrong in ways no reference value will catch.
+
+98% test coverage on the pricing and simulation modules. Every figure and table
+below is reproducible via `python scripts/generate_report.py`; Monte Carlo
+results come from fixed seeds and market results from CSVs cached under `data/`.
 
 ## Results
 
-Reference contract throughout: `S0 = K = 100`, `r = 5%`, `sigma = 20%`, `T = 1`.
-Black-Scholes call price **10.4506**.
+### Delta-hedged straddle, S&P 500, 2016-2026
+
+![hedging backtest](figures/hedging_backtest.png)
+
+Each cycle sells a one-month at-the-money straddle on the index, hedges it with
+the engine's delta, and holds to expiry. Spot, implied volatility (VIX) and the
+discount rate (1-month T-bill) are real daily observations; 118 non-overlapping
+cycles.
+
+| scenario | ann. return | ann. vol | Sharpe | max drawdown |
+|---|---|---|---|---|
+| frictionless, daily hedge | +11.2% | 5.2% | 2.14 | −5.7% |
+| IV −1.5 pts, 1bp cost, daily | +6.8% | 5.2% | 1.31 | −6.3% |
+| IV −1.5 pts, 1bp cost, weekly | +7.6% | 7.3% | 1.04 | −14.3% |
+| IV −3 pts, 1bp cost, daily | +2.8% | 5.2% | 0.54 | −10.6% |
+| unhedged, IV −1.5 pts | +4.1% | 11.5% | 0.36 | −32.0% |
+
+Three things the experiment actually shows:
+
+**Hedging is what creates the Sharpe, not the premium.** Unhedged, the same
+short-volatility position earns 0.36 and draws down 32%. The premium is
+collected either way; delta hedging is what strips out the directional variance
+around it.
+
+**The edge is dominated by the volatility you sell at.** The VIX is a strip
+across strikes and sits above the at-the-money implied volatility a straddle
+actually trades at. Selling 1.5 volatility points below the VIX cuts the Sharpe
+from 2.14 to 1.31; three points takes it to 0.54. Without real option chains I
+cannot pin that number down, so it is reported as a sensitivity rather than
+buried in a headline Sharpe.
+
+**Rehedging daily beats weekly even after costs.** Weekly rehedging earns
+slightly more gross but carries 40% more volatility and more than twice the
+drawdown. At 1bp per rehedge the transaction costs are small next to the gamma
+risk of leaving the position unhedged.
+
+The mean entry implied volatility is 17.3% against 15.1% subsequently realised —
+a 2.2 point variance risk premium, which is what the strategy harvests. The
+worst cycle opened 19 February 2020 at an implied 12.9% and realised 84.3%.
+Second worst was February 2018. Short volatility pays steadily and loses
+violently, and the P&L path shows it.
+
+**Limitations.** No historical option chains, so the straddle is constructed at
+the VIX rather than at traded quotes: no bid-ask, no skew, no term structure
+interpolation. Cycles are non-overlapping and start on a fixed calendar offset.
+118 cycles is a small sample for a strategy whose risk is concentrated in tail
+events, and two of them dominate the loss distribution.
 
 ### Convergence
+
+Reference contract for the pricing results: `S0 = K = 100`, `r = 5%`,
+`sigma = 20%`, `T = 1`. Black-Scholes call price **10.4506**.
 
 ![convergence](figures/convergence.png)
 
@@ -32,14 +84,22 @@ signature of the `O(N^-1/2)` rate.
 
 ![variance reduction](figures/variance_reduction.png)
 
-| estimator | price | standard error | variance removed |
-|---|---|---|---|
-| naive | 10.4513 | 0.02082 | — |
-| antithetic | 10.4409 | 0.01466 | 50.4% |
-| control variate | 10.4466 | 0.00834 | 83.9% |
+| estimator | price | standard error | variance removed | efficiency |
+|---|---|---|---|---|
+| naive | 10.4513 | 0.02082 | — | 1.00× |
+| antithetic | 10.4409 | 0.01466 | 50.4% | 2.20× |
+| control variate | 10.4466 | 0.00834 | 83.9% | 5.97× |
 
 The control variate reaches in 500,000 paths an accuracy that naive sampling
 would need roughly 3.1 million paths to match.
+
+Variance removed is measured at a matched path count, which is not the same as
+matched compute: antithetic draws half the normals per path, while the control
+variate pays for a pilot run and a covariance estimate. The efficiency column is
+the honest comparison — the ratio of `variance x runtime` against naive, so an
+estimator only scores above 1.0 if it reaches a given error in less wall-clock
+time. At this scale the two measures nearly agree, because random number
+generation is not the bottleneck.
 
 ### Greeks (N = 2,000,000)
 
@@ -159,7 +219,10 @@ src/mcpricer/
   pricing.py           European MC, convergence study, Longstaff-Schwartz
   variance_reduction.py  antithetic and control variate estimators
   greeks.py            finite-difference and pathwise estimators
+  data.py              cached FRED market data
+  backtest.py          delta-hedged straddle backtest
   reporting.py         figures and summary tables
+data/                  SP500, VIX and 1-month T-bill daily closes
 tests/                 one module per source module
 notebooks/             results writeup
 scripts/               figure and table regeneration

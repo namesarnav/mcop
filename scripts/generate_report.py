@@ -13,6 +13,7 @@ from mcpricer.pricing import lsm_american_price
 from mcpricer.reporting import (
     greeks_table,
     plot_convergence,
+    plot_hedging_backtest,
     plot_variance_reduction,
     plot_volatility_smiles,
 )
@@ -34,7 +35,8 @@ def main() -> None:
         print(
             f"  {row['method']:<16} price={row['price']:.4f} "
             f"se={row['standard_error']:.5f} "
-            f"variance reduction={row['variance_reduction_pct']:6.2f}%"
+            f"variance reduction={row['variance_reduction_pct']:6.2f}% "
+            f"efficiency={row['efficiency_gain']:5.2f}x"
         )
 
     print("\ngreeks")
@@ -59,6 +61,45 @@ def main() -> None:
     print(f"  {'strike':<13}" + "  ".join(f"{k:6.1f}" for k in smiles["strikes"]))
     for label in ("GBM", "Merton jumps", "Heston"):
         print(f"  {label:<13}" + "  ".join(f"{v:6.4f}" for v in smiles[label]))
+
+    _backtest_section()
+
+
+def _backtest_section() -> None:
+    from mcpricer.backtest import backtest_straddle
+    from mcpricer.data import load_market_data
+
+    hedged, unhedged = plot_hedging_backtest(FIGURES / "hedging_backtest.png")
+    data = load_market_data()
+    print("\ndelta-hedged short straddle, S&P 500")
+    header = f"  {'scenario':<30}{'ann ret':>9}{'ann vol':>9}{'sharpe':>8}{'maxDD':>8}"
+    print(header)
+    scenarios = [
+        ("frictionless, daily hedge", {}),
+        ("IV -1.5pts, 1bp, daily", dict(iv_offset=-0.015, hedge_cost_bps=1.0)),
+        ("IV -1.5pts, 1bp, weekly", dict(iv_offset=-0.015, hedge_cost_bps=1.0, rehedge_every=5)),
+        ("IV -3pts, 1bp, daily", dict(iv_offset=-0.03, hedge_cost_bps=1.0)),
+        ("unhedged, IV -1.5pts", dict(iv_offset=-0.015, hedge=False)),
+    ]
+    for label, kwargs in scenarios:
+        stats = backtest_straddle(data, **kwargs).stats
+        print(
+            f"  {label:<30}{stats['annualised_return']:>+9.3f}"
+            f"{stats['annualised_volatility']:>9.3f}{stats['sharpe']:>+8.2f}"
+            f"{stats['max_drawdown']:>8.3f}"
+        )
+    stats = hedged.stats
+    print(
+        f"  mean entry IV {stats['mean_entry_iv']:.3f}, "
+        f"mean realised {stats['mean_realised_vol']:.3f}, "
+        f"premium {stats['mean_variance_risk_premium']:.3f}"
+    )
+    worst = hedged.cycles.loc[hedged.cycles["pnl"].idxmin()]
+    print(
+        f"  worst cycle {worst['entry_date'].date()} "
+        f"entry IV {worst['entry_iv']:.3f} realised {worst['realised_vol']:.3f} "
+        f"P&L {worst['pnl']:+.3f}"
+    )
 
 
 if __name__ == "__main__":
