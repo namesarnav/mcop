@@ -7,6 +7,8 @@ shrinking the variance of the sampled payoff.
 
 from __future__ import annotations
 
+import time
+
 from typing import NamedTuple
 
 import numpy as np
@@ -23,6 +25,7 @@ __all__ = [
     "mc_european_price_antithetic",
     "mc_european_price_control_variate",
     "variance_reduction_pct",
+    "efficiency_gain",
     "compare_estimators",
 ]
 
@@ -131,6 +134,26 @@ def variance_reduction_pct(se_naive: float, se_reduced: float) -> float:
     return 100.0 * (1.0 - (se_reduced / se_naive) ** 2)
 
 
+def efficiency_gain(
+    se_naive: float, time_naive: float, se_reduced: float, time_reduced: float
+) -> float:
+    """Relative efficiency, (se^2 t)_naive / (se^2 t)_reduced.
+
+    Variance reduction per path flatters an estimator that costs more per path.
+    The quantity that matters is variance times work: an estimator is better
+    only if it reaches a given error in less time.
+    """
+    if se_naive <= 0 or time_naive <= 0 or se_reduced <= 0 or time_reduced <= 0:
+        raise ValueError("standard errors and times must be positive")
+    return (se_naive**2 * time_naive) / (se_reduced**2 * time_reduced)
+
+
+def _timed(call):
+    start = time.perf_counter()
+    result = call()
+    return result, time.perf_counter() - start
+
+
 def compare_estimators(
     S0: float,
     K: float,
@@ -148,31 +171,41 @@ def compare_estimators(
     of one lucky draw shared between them.
     """
     naive_seed, anti_seed, cv_seed = np.random.SeedSequence(seed).spawn(3)
-    naive = mc_european_price(
-        S0, K, r, sigma, T, n_paths, option_type,
-        rng=np.random.default_rng(naive_seed),
+    naive, naive_time = _timed(
+        lambda: mc_european_price(
+            S0, K, r, sigma, T, n_paths, option_type,
+            rng=np.random.default_rng(naive_seed),
+        )
     )
-    antithetic = mc_european_price_antithetic(
-        S0, K, r, sigma, T, n_paths, option_type,
-        rng=np.random.default_rng(anti_seed),
+    antithetic, antithetic_time = _timed(
+        lambda: mc_european_price_antithetic(
+            S0, K, r, sigma, T, n_paths, option_type,
+            rng=np.random.default_rng(anti_seed),
+        )
     )
-    control = mc_european_price_control_variate(
-        S0, K, r, sigma, T, n_paths, option_type,
-        rng=np.random.default_rng(cv_seed),
+    control, control_time = _timed(
+        lambda: mc_european_price_control_variate(
+            S0, K, r, sigma, T, n_paths, option_type,
+            rng=np.random.default_rng(cv_seed),
+        )
     )
     rows = []
-    for name, estimate in (
-        ("naive", naive),
-        ("antithetic", antithetic),
-        ("control variate", control),
+    for name, estimate, elapsed in (
+        ("naive", naive, naive_time),
+        ("antithetic", antithetic, antithetic_time),
+        ("control variate", control, control_time),
     ):
         rows.append(
             {
                 "method": name,
                 "price": estimate.price,
                 "standard_error": estimate.standard_error,
+                "seconds": elapsed,
                 "variance_reduction_pct": variance_reduction_pct(
                     naive.standard_error, estimate.standard_error
+                ),
+                "efficiency_gain": efficiency_gain(
+                    naive.standard_error, naive_time, estimate.standard_error, elapsed
                 ),
             }
         )

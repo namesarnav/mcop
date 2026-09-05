@@ -89,3 +89,28 @@ def test_comparison_table_reports_all_three_estimators():
     assert all(row["variance_reduction_pct"] > 0 for row in rows[1:])
     truth = bs_call_price(**BASE)
     assert all(abs(row["price"] - truth) < 3 * row["standard_error"] for row in rows)
+
+
+def test_efficiency_gain_accounts_for_runtime():
+    from mcpricer.variance_reduction import efficiency_gain
+
+    # Half the standard error for the same time is a fourfold efficiency gain.
+    assert abs(efficiency_gain(0.02, 1.0, 0.01, 1.0) - 4.0) < 1e-9
+    # The same gain bought with four times the work is no gain at all.
+    assert abs(efficiency_gain(0.02, 1.0, 0.01, 4.0) - 1.0) < 1e-9
+
+
+def test_efficiency_gain_rejects_non_positive_arguments():
+    from mcpricer.variance_reduction import efficiency_gain
+
+    with pytest.raises(ValueError):
+        efficiency_gain(0.02, 1.0, 0.01, 0.0)
+
+
+def test_comparison_table_reports_time_and_efficiency():
+    from mcpricer.variance_reduction import compare_estimators
+
+    rows = compare_estimators(**BASE, n_paths=N, seed=15)
+    assert all(row["seconds"] > 0 for row in rows)
+    assert abs(rows[0]["efficiency_gain"] - 1.0) < 1e-9
+    assert all(row["efficiency_gain"] > 1.0 for row in rows[1:])
