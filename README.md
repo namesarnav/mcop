@@ -208,7 +208,7 @@ measure `Q` under which every discounted tradable price is a martingale. The
 option price is then the discounted expectation of its payoff:
 
 ```
-C = e^{-rT} E_Q[payoff(S_T)]
+$$C = e^{-rT} E_Q[payoff(S_T)]$$
 ```
 
 The asset drifts at `r`, not at its real-world expected return, because
@@ -222,7 +222,7 @@ exactly what sampling estimates.
 Starting from `dS = r S dt + sigma S dW` and applying Itô's lemma to `log S`:
 
 ```
-d(log S) = (r - sigma^2/2) dt + sigma dW
+$$d(log S) = (r - sigma^2/2) dt + sigma dW$$
 ```
 
 The `-sigma^2/2` is the Itô correction, arising because `(dW)^2 = dt`.
